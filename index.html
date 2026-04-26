@@ -75,9 +75,9 @@ const STORAGE_KEY="rallyTimingDataManualV3",SUPABASE_CONFIG_KEY="rallyTimingSupa
   Cambia estos 3 valores antes de subir el HTML.
   Usa SIEMPRE la anon/public key, nunca la service_role key.
 */
-const DEFAULT_SUPABASE_URL = "https://wondzpqjuzcbmjakpyvb.supabase.co";
-const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbmR6cHFqdXpjYm1qYWtweXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxODA0NjEsImV4cCI6MjA5Mjc1NjQ2MX0.JW2uTG7mCOzhg7YbYjBmQKW5OAg-bQz-9e-tScuTkLA";
-const DEFAULT_SUPABASE_EVENT_ID = "rs-voltrega";
+const DEFAULT_SUPABASE_URL = "https://TU-PROYECTO.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY = "TU-ANON-KEY";
+const DEFAULT_SUPABASE_EVENT_ID = "test";
 const DEFAULT_SUPABASE_AUTOSYNC = "on";
 
 let supabaseClient=null,supabaseConfig={url:"",anonKey:"",eventId:"",autoSync:"off"},supabaseChannel=null,supabaseSaveTimer=null,isRemoteUpdate=false,currentUser=null;let rallyData={eventName:"Rally Costa Norte",surface:"Asfalto húmedo",session:"Clasificación manual",eventStatus:"Abierto",server:"Rally Spain #1",categories:[{name:"Rally2",description:""},{name:"Rally4",description:""},{name:"H-Classic",description:""}],stages:[{id:"tc1",name:"TC1 · Sierra Verde"},{id:"tc2",name:"TC2 · Puerto Rojo"},{id:"tc3",name:"TC3 · Monte Azul"}],drivers:[]};let currentStage="tc1";const $=id=>document.getElementById(id);
@@ -110,17 +110,47 @@ function generateOfficialPdf(){const type=$("officialExportType").value,rows=off
 
 function syncSupabaseInputs(){const set=(id,val)=>{if($(id))$(id).value=val||""};set("loginSupabaseUrlInput",supabaseConfig.url);set("loginSupabaseAnonInput",supabaseConfig.anonKey);set("loginSupabaseEventIdInput",supabaseConfig.eventId);if($("loginSupabaseAutoSyncInput"))$("loginSupabaseAutoSyncInput").value=supabaseConfig.autoSync||"off";set("supabaseUrlInput",supabaseConfig.url);set("supabaseAnonInput",supabaseConfig.anonKey);set("supabaseEventIdInput",supabaseConfig.eventId);if($("supabaseAutoSyncInput"))$("supabaseAutoSyncInput").value=supabaseConfig.autoSync||"off"}
 function readSupabaseInputs(prefix=""){const url=$(prefix+"SupabaseUrlInput")?.value.trim()||supabaseConfig.url||"",anonKey=$(prefix+"SupabaseAnonInput")?.value.trim()||supabaseConfig.anonKey||"",eventId=$(prefix+"SupabaseEventIdInput")?.value.trim()||supabaseConfig.eventId||"",autoSync=$(prefix+"SupabaseAutoSyncInput")?.value||supabaseConfig.autoSync||"off";return{url,anonKey,eventId,autoSync}}
-function loadSupabaseConfig(){try{supabaseConfig=JSON.parse(localStorage.getItem(SUPABASE_CONFIG_KEY)||"{}")}catch{supabaseConfig={}};supabaseConfig={url:supabaseConfig.url||DEFAULT_SUPABASE_URL,anonKey:supabaseConfig.anonKey||DEFAULT_SUPABASE_ANON_KEY,eventId:supabaseConfig.eventId||DEFAULT_SUPABASE_EVENT_ID,autoSync:supabaseConfig.autoSync||DEFAULT_SUPABASE_AUTOSYNC};syncSupabaseInputs();renderSupabaseStatus()}
-function saveSupabaseConfig(prefix=""){supabaseConfig=readSupabaseInputs(prefix);localStorage.setItem(SUPABASE_CONFIG_KEY,JSON.stringify(supabaseConfig));initSupabase();syncSupabaseInputs();msg("Conexión Supabase guardada.")}
+function loadSupabaseConfig(){
+  try{supabaseConfig=JSON.parse(localStorage.getItem(SUPABASE_CONFIG_KEY)||"{}")}catch{supabaseConfig={}};
+  supabaseConfig={
+    url:supabaseConfig.url||DEFAULT_SUPABASE_URL,
+    anonKey:supabaseConfig.anonKey||DEFAULT_SUPABASE_ANON_KEY,
+    eventId:supabaseConfig.eventId||DEFAULT_SUPABASE_EVENT_ID,
+    autoSync:"on"
+  };
+  localStorage.setItem(SUPABASE_CONFIG_KEY,JSON.stringify(supabaseConfig));
+  syncSupabaseInputs();
+  renderSupabaseStatus();
+}
+function saveSupabaseConfig(prefix=""){
+  supabaseConfig=readSupabaseInputs(prefix);
+  supabaseConfig.autoSync=supabaseConfig.autoSync||"on";
+  localStorage.setItem(SUPABASE_CONFIG_KEY,JSON.stringify(supabaseConfig));
+  initSupabase();
+  syncSupabaseInputs();
+  msg("Conexión Supabase guardada.");
+}
 function clearSupabaseConfig(){localStorage.removeItem(SUPABASE_CONFIG_KEY);if(supabaseChannel&&supabaseClient)supabaseClient.removeChannel(supabaseChannel);supabaseClient=null;supabaseChannel=null;currentUser=null;supabaseConfig={url:"",anonKey:"",eventId:"",autoSync:"off"};syncSupabaseInputs();renderSupabaseStatus();msg("Supabase desconectado.")}
 function renderSupabaseStatus(){if($("supabaseStatus"))$("supabaseStatus").textContent=supabaseClient?"Conectado":"Sin configurar";if($("supabaseUserStatus"))$("supabaseUserStatus").textContent=currentUser?.email||"Sin sesión";if($("supabaseEventStatus"))$("supabaseEventStatus").textContent=supabaseConfig.eventId||"-";if($("supabaseLastSync"))$("supabaseLastSync").textContent=localStorage.getItem("rallyTimingLastSupabaseSync")||"-"}
 async function initSupabase(){if(!window.supabase||!supabaseConfig.url||!supabaseConfig.anonKey||!supabaseConfig.eventId){supabaseClient=null;renderSupabaseStatus();return}supabaseClient=window.supabase.createClient(supabaseConfig.url,supabaseConfig.anonKey);const {data}=await supabaseClient.auth.getUser();currentUser=data?.user||null;subscribeSupabase();renderSupabaseStatus()}
-async function loginSupabase(){if(!supabaseClient)await initSupabase();if(!supabaseClient)return showLoginError("Supabase no está configurado. Revisa DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_ANON_KEY y DEFAULT_SUPABASE_EVENT_ID dentro del HTML.");const email=$("dcEmail").value.trim(),password=$("dcPassword").value;if(!email||!password)return showLoginError("Introduce email y contraseña.");const {data,error}=await supabaseClient.auth.signInWithPassword({email,password});if(error)return showLoginError(error.message);currentUser=data.user;$("dcLogin").classList.add("hidden");$("dcContent").classList.remove("hidden");renderSupabaseStatus();await pullFromSupabase();msg("Sesión iniciada.")}
+async function loginSupabase(){if(!supabaseClient)await initSupabase();if(!supabaseClient)return showLoginError("Supabase no está configurado. Revisa DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_ANON_KEY y DEFAULT_SUPABASE_EVENT_ID dentro del HTML.");const email=$("dcEmail").value.trim(),password=$("dcPassword").value;if(!email||!password)return showLoginError("Introduce email y contraseña.");const {data,error}=await supabaseClient.auth.signInWithPassword({email,password});if(error)return showLoginError(error.message);currentUser=data.user;
+supabaseConfig.autoSync="on";
+localStorage.setItem(SUPABASE_CONFIG_KEY,JSON.stringify(supabaseConfig));
+subscribeSupabase();
+$("dcLogin").classList.add("hidden");
+$("dcContent").classList.remove("hidden");
+renderSupabaseStatus();
+await pullFromSupabase();
+msg("Sesión iniciada. Sincronización automática activada.")}
 function showLoginError(text){const e=$("loginError");e.textContent=text||"No se pudo iniciar sesión.";e.classList.remove("hidden")}
 async function logoutSupabase(){if(supabaseClient)await supabaseClient.auth.signOut();currentUser=null;$("dcContent").classList.add("hidden");$("dcLogin").classList.remove("hidden");renderSupabaseStatus();msg("Sesión cerrada.")}
 async function pullFromSupabase(){if(!supabaseClient||!supabaseConfig.eventId)return msg("Configura Supabase primero.",true);const {data,error}=await supabaseClient.from("rally_events").select("data").eq("event_id",supabaseConfig.eventId).maybeSingle();if(error)return msg("Error descargando Supabase: "+error.message,true);if(data?.data){isRemoteUpdate=true;rallyData=data.data;migrate();localStorage.setItem(STORAGE_KEY,JSON.stringify(rallyData));isRemoteUpdate=false;renderAll();localStorage.setItem("rallyTimingLastSupabaseSync",new Date().toLocaleString("es-ES"));renderSupabaseStatus();msg("Datos descargados desde Supabase.")}else if(currentUser){await pushToSupabase();msg("No había datos remotos. Se ha creado el evento en Supabase.")}else msg("No hay datos remotos todavía.",true)}
 async function pushToSupabase(){if(!supabaseClient||!supabaseConfig.eventId)return msg("Configura Supabase primero.",true);const payload={event_id:supabaseConfig.eventId,data:rallyData,updated_at:new Date().toISOString()};const {error}=await supabaseClient.from("rally_events").upsert(payload,{onConflict:"event_id"});if(error)return msg("Error subiendo a Supabase: "+error.message,true);localStorage.setItem("rallyTimingLastSupabaseSync",new Date().toLocaleString("es-ES"));renderSupabaseStatus();msg("Datos subidos a Supabase.")}
-function queueSupabasePush(){if(supabaseConfig.autoSync!=="on"||!supabaseClient||!currentUser)return;clearTimeout(supabaseSaveTimer);supabaseSaveTimer=setTimeout(()=>pushToSupabase(),800)}
+function queueSupabasePush(){
+  if(supabaseConfig.autoSync!=="on"||!supabaseClient||!currentUser)return;
+  clearTimeout(supabaseSaveTimer);
+  supabaseSaveTimer=setTimeout(()=>pushToSupabase(),500);
+}
 function subscribeSupabase(){if(!supabaseClient||!supabaseConfig.eventId)return;if(supabaseChannel)supabaseClient.removeChannel(supabaseChannel);supabaseChannel=supabaseClient.channel("rally-events-"+supabaseConfig.eventId).on("postgres_changes",{event:"*",schema:"public",table:"rally_events",filter:"event_id=eq."+supabaseConfig.eventId},payload=>{const incoming=payload.new?.data;if(!incoming)return;isRemoteUpdate=true;rallyData=incoming;migrate();localStorage.setItem(STORAGE_KEY,JSON.stringify(rallyData));isRemoteUpdate=false;renderAll();localStorage.setItem("rallyTimingLastSupabaseSync",new Date().toLocaleString("es-ES"));renderSupabaseStatus()}).subscribe()}
 function exportJSON(){$("jsonBox").value=JSON.stringify(rallyData,null,2);msg("JSON exportado.")}function importJSON(){try{rallyData=JSON.parse($("jsonBox").value);migrate();saveData();renderAll();msg("JSON importado.")}catch{msg("JSON no válido.",true)}}function resetData(){if(!confirm("¿Resetear todos los datos?"))return;localStorage.removeItem(STORAGE_KEY);location.reload()}
 document.querySelectorAll(".nav-button").forEach(b=>b.onclick=()=>switchView(b.dataset.view));document.querySelectorAll(".dc-tab").forEach(b=>b.onclick=()=>switchDc(b.dataset.dc));$("searchInput").oninput=renderAll;$("classFilter").onchange=renderAll;$("statusFilter").onchange=renderAll;$("refreshButton").onclick=()=>renderAll();$("dcLoginButton").onclick=loginSupabase;if($("saveLoginSupabaseButton"))$("saveLoginSupabaseButton").onclick=()=>saveSupabaseConfig("login");if($("pullLoginSupabaseButton"))$("pullLoginSupabaseButton").onclick=()=>{saveSupabaseConfig("login");pullFromSupabase()};$("saveEventButton").onclick=saveEvent;$("pilotEditSelect").onchange=loadPilotForm;$("savePilotButton").onclick=savePilot;$("newPilotButton").onclick=clearPilotForm;$("deletePilotButton").onclick=deletePilot;$("categoryEditSelect").onchange=loadCategoryForm;$("saveCategoryButton").onclick=saveCategory;$("newCategoryButton").onclick=clearCategoryForm;$("deleteCategoryButton").onclick=deleteCategory;$("stageEditSelect").onchange=loadStageForm;$("saveStageButton").onclick=saveStage;$("newStageButton").onclick=()=>{$("stageEditSelect").value="";loadStageForm()};$("deleteStageButton").onclick=deleteStage;$("timeDriverName").oninput=fillTimePilot;$("addManualTimeButton").onclick=addManualTime;$("clearTimeFormButton").onclick=clearTimeForm;$("applyPenaltyButton").onclick=applyPenalty;$("clearPenaltyButton").onclick=clearPenalty;if($("saveLogoButton"))$("saveLogoButton").onclick=saveLogo;if($("clearLogoButton"))$("clearLogoButton").onclick=clearLogo;if($("generateOfficialPdfButton"))$("generateOfficialPdfButton").onclick=generateOfficialPdf;if($("saveSupabaseButton"))$("saveSupabaseButton").onclick=()=>saveSupabaseConfig("");if($("pullSupabaseButton"))$("pullSupabaseButton").onclick=pullFromSupabase;if($("pushSupabaseButton"))$("pushSupabaseButton").onclick=pushToSupabase;if($("logoutSupabaseButton"))$("logoutSupabaseButton").onclick=logoutSupabase;if($("clearSupabaseButton"))$("clearSupabaseButton").onclick=clearSupabaseConfig;$("exportButton").onclick=exportJSON;$("importButton").onclick=importJSON;$("resetButton").onclick=resetData;
