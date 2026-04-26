@@ -77,7 +77,7 @@ const STORAGE_KEY="rallyTimingDataManualV3",SUPABASE_CONFIG_KEY="rallyTimingSupa
 */
 const DEFAULT_SUPABASE_URL = "https://wondzpqjuzcbmjakpyvb.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndvbmR6cHFqdXpjYm1qYWtweXZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxODA0NjEsImV4cCI6MjA5Mjc1NjQ2MX0.JW2uTG7mCOzhg7YbYjBmQKW5OAg-bQz-9e-tScuTkLA";
-const DEFAULT_SUPABASE_EVENT_ID = "test";
+const DEFAULT_SUPABASE_EVENT_ID = "rs-voltrega";
 const DEFAULT_SUPABASE_AUTOSYNC = "on";
 
 let supabaseClient=null,supabaseConfig={url:"",anonKey:"",eventId:"",autoSync:"off"},supabaseChannel=null,supabaseSaveTimer=null,isRemoteUpdate=false,currentUser=null;let rallyData={eventName:"Rally Costa Norte",surface:"Asfalto húmedo",session:"Clasificación manual",eventStatus:"Abierto",server:"Rally Spain #1",categories:[{name:"Rally2",description:""},{name:"Rally4",description:""},{name:"H-Classic",description:""}],stages:[{id:"tc1",name:"TC1 · Sierra Verde"},{id:"tc2",name:"TC2 · Puerto Rojo"},{id:"tc3",name:"TC3 · Monte Azul"}],drivers:[]};let currentStage="tc1";const $=id=>document.getElementById(id);
