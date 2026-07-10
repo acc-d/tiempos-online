@@ -901,8 +901,8 @@
         endpoint: "",
         token: "",
         polling: 30,
-        supabaseUrl: "",
-        supabaseAnonKey: "",
+        supabaseUrl: "https://hvneymozipjzcbskhdbg.supabase.co",
+        supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh2bmV5bW96aXBqemNic2toZGJnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2ODM1MjUsImV4cCI6MjA5OTI1OTUyNX0.I7fa3U_L18x5HBLTkLgsr2GdB-0wdp3ElwS35oCqcLg",
         supabaseTable: "rally_state",
         supabaseRowId: "assetto-corsa-community",
         realtime: true,
@@ -990,9 +990,14 @@
 
     function normalizeData(source) {
       const merged = { ...structuredClone(defaultData), ...source, api: { ...defaultData.api, ...(source?.api || {}) } };
+      merged.api.supabaseUrl = normalizeSupabaseUrl(merged.api.supabaseUrl);
       merged.events = (merged.events || []).map(event => ({ format: "rally", ...event }));
       merged.drivers = (merged.drivers || []).map(driver => ({ codriver: "", ...driver }));
       return merged;
+    }
+
+    function normalizeSupabaseUrl(url) {
+      return String(url || "").trim().replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
     }
 
     function saveData(message = "Guardado") {
@@ -1698,7 +1703,7 @@
         endpoint: values.endpoint,
         token: values.token,
         polling: Number(values.polling || 30),
-        supabaseUrl: values.supabaseUrl,
+        supabaseUrl: normalizeSupabaseUrl(values.supabaseUrl),
         supabaseAnonKey: values.supabaseAnonKey,
         supabaseTable: values.supabaseTable || "rally_state",
         supabaseRowId: values.supabaseRowId || "assetto-corsa-community",
