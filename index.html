@@ -412,6 +412,22 @@
       margin: 0 0 14px;
       color: #00305f;
     }
+    .remember-row {
+      display: flex;
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      gap: 9px;
+      margin-top: 10px;
+      color: #00305f;
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: none;
+    }
+    .remember-row input {
+      width: 16px;
+      height: 16px;
+      accent-color: #00305f;
+    }
     .login-modal .admin-actions {
       justify-content: flex-end;
     }
@@ -885,8 +901,9 @@
   <div class="modal-backdrop" id="loginModal" aria-hidden="true">
     <form class="login-modal" id="loginForm">
       <h3>Inicio dirección de carrera</h3>
-      <label>Usuario<input class="input" name="user" autocomplete="username" required></label>
+      <label>Email admin<input class="input" name="user" type="email" autocomplete="username" required></label>
       <label>Clave<input class="input" name="pass" type="password" autocomplete="current-password" required></label>
+      <label class="remember-row"><input name="remember" type="checkbox"> Recordar acceso en este navegador</label>
       <div class="admin-actions">
         <button class="btn secondary" type="button" data-close-login>Cancelar</button>
         <button class="btn" type="submit">Entrar</button>
@@ -974,7 +991,7 @@
     let detailTab = "itinerary";
     let selectedStageId = "";
     let categoryFilter = "absolute";
-    let directorLoggedIn = sessionStorage.getItem("directorLoggedIn") === "true";
+    let directorLoggedIn = sessionStorage.getItem("directorLoggedIn") === "true" || localStorage.getItem("directorLoggedIn") === "true";
     let remoteApplying = false;
     let supabaseClient = null;
     let supabaseChannel = null;
@@ -1073,6 +1090,27 @@
         supabaseClient = mod.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
       }
       return supabaseClient;
+    }
+
+    async function loginDirectorWithSupabase(email, password) {
+      await ensureSupabaseClient();
+      if (!supabaseClient) throw new Error("Supabase no está configurado");
+      const { data: authData, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      return authData?.user;
+    }
+
+    async function logoutDirector() {
+      try {
+        if (supabaseClient) await supabaseClient.auth.signOut();
+      } catch (error) {
+        console.warn("No se pudo cerrar sesión Supabase", error);
+      }
+      directorLoggedIn = false;
+      sessionStorage.removeItem("directorLoggedIn");
+      localStorage.removeItem("directorLoggedIn");
+      renderDirectorAccess();
+      showToast("Sesión de director cerrada");
     }
 
     async function persistSupabase() {
@@ -1902,10 +1940,7 @@
       const loginBtn = event.target.closest("#directorLogin");
       if (loginBtn) {
         if (directorLoggedIn) {
-          directorLoggedIn = false;
-          sessionStorage.removeItem("directorLoggedIn");
-          renderDirectorAccess();
-          showToast("Sesión de director cerrada");
+          await logoutDirector();
           return;
         }
         document.getElementById("loginModal").classList.add("show");
@@ -2074,17 +2109,25 @@
       const values = Object.fromEntries(new FormData(form).entries());
 
       if (form.id === "loginForm") {
-        if (values.user === "director" && values.pass === "acc2026") {
+        try {
+          await loginDirectorWithSupabase(values.user, values.pass);
           directorLoggedIn = true;
-          sessionStorage.setItem("directorLoggedIn", "true");
+          if (values.remember === "on") {
+            localStorage.setItem("directorLoggedIn", "true");
+            sessionStorage.removeItem("directorLoggedIn");
+          } else {
+            sessionStorage.setItem("directorLoggedIn", "true");
+            localStorage.removeItem("directorLoggedIn");
+          }
           renderDirectorAccess();
           document.getElementById("loginModal").classList.remove("show");
           document.getElementById("loginModal").setAttribute("aria-hidden", "true");
           form.reset();
           showToast("Sesión de director iniciada");
           document.getElementById("direccion").scrollIntoView({ behavior: "smooth" });
-        } else {
-          showToast("Credenciales incorrectas");
+        } catch (error) {
+          console.warn("Login Supabase fallido", error);
+          showToast("Credenciales de Supabase incorrectas");
         }
         return;
       }
