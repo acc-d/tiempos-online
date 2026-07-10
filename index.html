@@ -1592,17 +1592,18 @@
         panel.innerHTML = `<h3>Tiempos manuales</h3>
           <div class="notice">Introduce tiempos como segundos, <strong>5:21.42</strong> o <strong>1:05:21.42</strong>. Si ya existe un tiempo para ese piloto y tramo, se actualiza.</div>
           <form id="timeForm" class="form-grid">
+            <input type="hidden" name="id">
             <label>Piloto<input class="input" name="driverSearch" list="driverSearchList" placeholder="Escribe dorsal, piloto o copiloto" required></label>
             ${driverSearch}
             <label>Tramo<select name="stageId" required>${stageOpts}</select></label>
             <label>Tiempo<input class="input" name="timeValue" placeholder="5:21.42" required></label>
             <label>Origen<select name="source"><option>Manual</option><option>Assetto API</option><option>Importado</option></select></label>
-            <div class="admin-actions wide"><button class="btn" type="button" data-save-time>Guardar tiempo</button></div>
+            <div class="admin-actions wide"><button class="btn" type="button" data-save-time>Guardar tiempo</button><button class="btn secondary" type="reset">Limpiar</button></div>
           </form>
           <div class="mini-list">${eventTimes().map(item => {
             const driver = byId(data.drivers, item.driverId);
             const stage = byId(data.stages, item.stageId);
-            return `<div class="mini-row"><div><strong>${driver?.name || "-"} · ${stage?.code || "-"}</strong><div class="team mono">${formatTime(Number(item.seconds))} · ${item.source}</div></div><button class="btn small danger" data-action="delete-time" data-id="${item.id}">Eliminar</button></div>`;
+            return `<div class="mini-row"><div><strong>${driver?.name || "-"} · ${stage?.code || "-"}</strong><div class="team mono">${formatTime(Number(item.seconds))} · ${item.source}</div></div><div><button class="btn small dark" data-action="edit-time" data-id="${item.id}">Editar</button> <button class="btn small danger" data-action="delete-time" data-id="${item.id}">Eliminar</button></div></div>`;
           }).join("") || `<div class="empty">Sin tiempos.</div>`}</div>`;
       }
 
@@ -1613,7 +1614,7 @@
             <label>Piloto<input class="input" name="driverSearch" list="driverSearchList" placeholder="Escribe dorsal, piloto o copiloto" required></label>
             ${driverSearch}
             <label>Tramo<select name="stageId">${stageOpts}</select></label>
-            <label>Segundos<input class="input" name="seconds" type="number" step="0.01" required></label>
+            <label>Tiempo penalizado<input class="input" name="penaltyValue" placeholder="0:10.00" required></label>
             <label class="wide">Motivo<input class="input" name="reason" required></label>
             <div class="admin-actions wide"><button class="btn" type="button" data-save-penalty>Guardar penalización</button><button class="btn secondary" type="reset">Limpiar</button></div>
           </form>
@@ -1678,11 +1679,13 @@
     function fillForm(formId, values) {
       const form = document.getElementById(formId);
       if (!form) return;
-      const formValues = form.elements.categories ? { ...values, categories: driverCategories(values).join(", ") } : values;
+      const formValues = form.elements.categories ? { ...values, categories: driverCategories(values).join(", ") } : { ...values };
       if (form.elements.driverSearch && values?.driverId) {
         const driver = byId(data.drivers, values.driverId);
         formValues.driverSearch = driverLabel(driver);
       }
+      if (form.elements.timeValue && values?.seconds !== undefined) formValues.timeValue = formatTime(Number(values.seconds));
+      if (form.elements.penaltyValue && values?.seconds !== undefined) formValues.penaltyValue = formatTime(Number(values.seconds));
       Object.entries(formValues).forEach(([key, value]) => {
         if (form.elements[key] && form.elements[key].type !== "file") form.elements[key].value = value ?? "";
       });
@@ -1761,8 +1764,8 @@
       if (!driverId) return showToast("Selecciona un piloto válido");
       const seconds = parseTime(values.timeValue);
       if (seconds === null) return showToast("Formato de tiempo no válido");
-      const existing = data.times.find(item => item.eventId === activeEventId() && item.driverId === driverId && item.stageId === values.stageId);
-      const item = { id: existing?.id || uid("tm"), eventId: activeEventId(), driverId, stageId: values.stageId, seconds, source: values.source };
+      const existing = values.id ? byId(data.times, values.id) : data.times.find(item => item.eventId === activeEventId() && item.driverId === driverId && item.stageId === values.stageId);
+      const item = { id: values.id || existing?.id || uid("tm"), eventId: activeEventId(), driverId, stageId: values.stageId, seconds, source: values.source };
       data.times = existing ? data.times.map(time => time.id === existing.id ? item : time) : [...data.times, item];
       form.reset();
       saveData("Tiempo guardado");
@@ -1772,7 +1775,9 @@
       const values = Object.fromEntries(new FormData(form).entries());
       const driverId = resolveDriverId(values.driverSearch || values.driverId);
       if (!driverId || !values.reason?.trim()) return showToast("Completa piloto válido y motivo");
-      const item = { id: values.id || uid("pen"), eventId: activeEventId(), driverId, stageId: values.stageId, seconds: Number(values.seconds || 0), reason: values.reason };
+      const seconds = parseTime(values.penaltyValue || values.seconds);
+      if (seconds === null) return showToast("Formato de penalización no válido");
+      const item = { id: values.id || uid("pen"), eventId: activeEventId(), driverId, stageId: values.stageId, seconds, reason: values.reason };
       data.penalties = values.id ? data.penalties.map(existing => existing.id === values.id ? item : existing) : [...data.penalties, item];
       form.reset();
       saveData("Penalización guardada");
@@ -2120,6 +2125,7 @@
         data.times = data.times.filter(item => item.id !== id);
         saveData("Tiempo eliminado");
       }
+      if (action === "edit-time") fillForm("timeForm", byId(data.times, id));
       if (action === "edit-penalty") fillForm("penaltyForm", byId(data.penalties, id));
       if (action === "delete-penalty") { data.penalties = data.penalties.filter(item => item.id !== id); saveData("Penalización eliminada"); }
       if (action === "edit-retirement") fillForm("retirementForm", byId(data.retirements, id));
