@@ -869,6 +869,7 @@
             <button class="btn dark admin-tab" data-admin="times">Tiempos manuales</button>
             <button class="btn dark admin-tab" data-admin="penalties">Penalizaciones</button>
             <button class="btn dark admin-tab" data-admin="retirements">Abandonos</button>
+            <button class="btn dark admin-tab" data-admin="export">Exportar PDF</button>
             <button class="btn dark admin-tab" data-admin="api">API Assetto Corsa</button>
           </aside>
           <div class="admin-panel" id="adminPanel"></div>
@@ -991,8 +992,13 @@
     function normalizeData(source) {
       const merged = { ...structuredClone(defaultData), ...source, api: { ...defaultData.api, ...(source?.api || {}) } };
       merged.api.supabaseUrl = normalizeSupabaseUrl(merged.api.supabaseUrl);
-      merged.events = (merged.events || []).map(event => ({ format: "rally", ...event }));
-      merged.drivers = (merged.drivers || []).map(driver => ({ codriver: "", ...driver }));
+      merged.events = (merged.events || []).map((event, index) => ({ format: "rally", order: index + 1, ...event }));
+      merged.drivers = (merged.drivers || []).map(driver => {
+        const categories = Array.isArray(driver.categories)
+          ? driver.categories
+          : String(driver.category || "").split(",").map(item => item.trim()).filter(Boolean);
+        return { codriver: "", ...driver, categories, category: categories[0] || driver.category || "" };
+      });
       return merged;
     }
 
@@ -1102,6 +1108,10 @@
     const uid = prefix => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
     const eventInitials = event => (event.name || "Rally").split(/\s+/).filter(Boolean).slice(0, 3).map(word => word[0]).join("");
+    const sortedEvents = () => [...data.events].sort((a, b) => Number(a.order || 9999) - Number(b.order || 9999) || String(a.name).localeCompare(String(b.name)));
+    const driverCategories = driver => Array.isArray(driver.categories) && driver.categories.length ? driver.categories : [driver.category].filter(Boolean);
+    const categoryText = driver => driverCategories(driver).join(" / ") || "-";
+    const parseCategories = value => String(value || "").split(",").map(item => item.trim()).filter(Boolean);
 
     function formatTime(seconds) {
       if (!Number.isFinite(seconds)) return "-";
@@ -1163,7 +1173,7 @@
       const retireIds = new Set(eventRetirements().map(item => item.driverId));
       const isHillclimbGeneral = activeEvent()?.format === "subida" && stageIds.length > 1;
       const rows = eventDrivers()
-        .filter(driver => selectedCategory === "absolute" || driver.category === selectedCategory)
+        .filter(driver => selectedCategory === "absolute" || driverCategories(driver).includes(selectedCategory))
         .map(driver => {
           const driverTimes = eventTimes().filter(time => time.driverId === driver.id && stageSet.has(time.stageId));
           const scoringTimes = isHillclimbGeneral
@@ -1215,7 +1225,7 @@
       document.getElementById("publicApp").innerHTML = `
         <div class="public-wrap">
           <h1 class="public-title">Tiempos online 2026</h1>
-          <div>${data.events.map(event => eventStrip(event)).join("") || `<div class="content-card">No hay pruebas creadas todavía.</div>`}</div>
+          <div>${sortedEvents().map(event => eventStrip(event)).join("") || `<div class="content-card">No hay pruebas creadas todavía.</div>`}</div>
         </div>`;
     }
 
@@ -1309,7 +1319,7 @@
       selectedStageId = stage.id;
       const stageIndex = stages.findIndex(item => item.id === stage.id);
       const untilStageIds = stages.slice(0, stageIndex + 1).map(item => item.id);
-      const categories = [...new Set(eventDrivers().map(driver => driver.category).filter(Boolean))];
+      const categories = [...new Set(eventDrivers().flatMap(driver => driverCategories(driver)).filter(Boolean))];
       const stageRows = classificationForStages([stage.id], categoryFilter).filter(row => row.hasTime);
       const generalRows = classificationForStages(untilStageIds, categoryFilter).filter(row => row.hasTime);
       document.getElementById("publicApp").innerHTML = `
@@ -1341,7 +1351,7 @@
               <td class="pos-cell">${index + 1}</td>
               <td class="mono">${esc(row.driver.number)}</td>
               <td><strong>${esc(row.driver.name)}</strong><br><span>${esc(row.driver.codriver || row.driver.team)}</span></td>
-              <td>${esc(row.driver.category)}</td>
+              <td>${esc(categoryText(row.driver))}</td>
               <td class="time-cell">${formatTime(row.total)}${row.penalty ? `<br><small style="color:#d83212">+${formatTime(row.penalty)}</small>` : ""}</td>
               <td class="dif-cell">${gap ? `+${formatTime(gap)}` : "+0.0"}</td>
             </tr>`;
@@ -1367,7 +1377,7 @@
 
     function driversTable() {
       return `<table><thead><tr><th>Dorsal</th><th>Piloto</th><th>Copiloto</th><th>Equipo</th><th>Coche</th><th>Categoría</th></tr></thead><tbody>${eventDrivers().map(driver => `
-        <tr><td>#${esc(driver.number)}</td><td>${esc(driver.name)}</td><td>${esc(driver.codriver || "-")}</td><td>${esc(driver.team)}</td><td>${esc(driver.car)}</td><td>${esc(driver.category)}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">Sin inscritos.</td></tr>`}</tbody></table>`;
+        <tr><td>#${esc(driver.number)}</td><td>${esc(driver.name)}</td><td>${esc(driver.codriver || "-")}</td><td>${esc(driver.team)}</td><td>${esc(driver.car)}</td><td>${esc(categoryText(driver))}</td></tr>`).join("") || `<tr><td colspan="6" class="empty">Sin inscritos.</td></tr>`}</tbody></table>`;
     }
 
     function renderHero() {
@@ -1383,7 +1393,7 @@
 
     function renderEventSelector() {
       const selector = document.getElementById("eventSelector");
-      selector.innerHTML = data.events.map(event => `<option value="${event.id}" ${event.id === activeEventId() ? "selected" : ""}>${event.name}</option>`).join("");
+      selector.innerHTML = sortedEvents().map(event => `<option value="${event.id}" ${event.id === activeEventId() ? "selected" : ""}>${event.name}</option>`).join("");
     }
 
     function renderMetrics() {
@@ -1407,7 +1417,7 @@
     function renderClassification() {
       const query = document.getElementById("searchInput").value.trim().toLowerCase();
       const rows = classification(currentStage).filter(row => {
-        const haystack = `${row.driver.name} ${row.driver.codriver || ""} ${row.driver.team} ${row.driver.car} ${row.driver.category}`.toLowerCase();
+        const haystack = `${row.driver.name} ${row.driver.codriver || ""} ${row.driver.team} ${row.driver.car} ${categoryText(row.driver)}`.toLowerCase();
         return haystack.includes(query);
       });
       const leader = rows.find(row => row.hasTime && !row.retired);
@@ -1417,7 +1427,7 @@
           <td class="rank">${row.retired || !row.hasTime ? "-" : index + 1}</td>
           <td><div class="pilot">#${row.driver.number} ${row.driver.name}</div><div class="team">${row.driver.codriver || row.driver.team}</div></td>
           <td>${row.driver.car}</td>
-          <td><span class="badge">${row.driver.category}</span></td>
+          <td><span class="badge">${categoryText(row.driver)}</span></td>
           <td class="mono">${formatTime(row.raw)}</td>
           <td class="mono">${row.penalty ? `+${formatTime(row.penalty)}` : "-"}</td>
           <td class="mono"><strong>${row.hasTime ? formatTime(row.total) : "-"}</strong></td>
@@ -1462,7 +1472,7 @@
           <td>${driver.name}</td>
           <td>${driver.team}</td>
           <td>${driver.car}</td>
-          <td><span class="badge">${driver.category}</span></td>
+          <td><span class="badge">${categoryText(driver)}</span></td>
           <td><span class="badge ${driver.status === "Abandono" ? "red" : "green"}">${driver.status}</span></td>
         </tr>`).join("") || `<tr><td colspan="6" class="empty">No hay inscritos.</td></tr>`;
     }
@@ -1477,6 +1487,8 @@
       const event = activeEvent();
       const driverOpts = options(eventDrivers(), "", d => `#${d.number} ${d.name}`);
       const stageOpts = options(eventStages(), "", s => `${s.code} ${s.name}`);
+      const exportCategories = [...new Set(eventDrivers().flatMap(driver => driverCategories(driver)).filter(Boolean))];
+      const categoryOpts = `<option value="absolute">Absoluta</option>${exportCategories.map(category => `<option value="${esc(category)}">${esc(category)}</option>`).join("")}`;
 
       if (adminView === "events") {
         panel.innerHTML = `<h3>Eventos</h3>
@@ -1484,6 +1496,7 @@
           <form id="eventForm" class="form-grid">
             <input type="hidden" name="id">
             <label>Nombre<input class="input" name="name" required></label>
+            <label>Orden<input class="input" name="order" type="number" min="1" step="1"></label>
             <label>Fecha<input class="input" name="date" placeholder="18-19 julio 2026"></label>
             <label>Ubicación<input class="input" name="location"></label>
             <label>Superficie<input class="input" name="surface" placeholder="Asfalto, tierra, mixto"></label>
@@ -1494,7 +1507,7 @@
             <label class="wide">Descripción<textarea name="description"></textarea></label>
             <div class="admin-actions wide"><button class="btn" type="button" data-save-event>Guardar evento</button><button class="btn secondary" type="reset">Limpiar</button></div>
           </form>
-          <div class="mini-list">${data.events.map(item => `<div class="mini-row"><div><strong>${item.name}</strong><div class="team">${item.date} · ${item.status} · ${item.format === "subida" ? "Formato subida" : "Formato rally"}</div></div><div><button class="btn small ok" data-action="activate-event" data-id="${item.id}">Publicar</button> <button class="btn small dark" data-action="edit-event" data-id="${item.id}">Editar</button> <button class="btn small danger" data-action="delete-event" data-id="${item.id}">Eliminar</button></div></div>`).join("")}</div>`;
+          <div class="mini-list">${sortedEvents().map(item => `<div class="mini-row"><div><strong>${item.order || "-"} · ${item.name}</strong><div class="team">${item.date} · ${item.status} · ${item.format === "subida" ? "Formato subida" : "Formato rally"}</div></div><div><button class="btn small dark" data-action="move-event-up" data-id="${item.id}">↑</button> <button class="btn small dark" data-action="move-event-down" data-id="${item.id}">↓</button> <button class="btn small ok" data-action="activate-event" data-id="${item.id}">Publicar</button> <button class="btn small dark" data-action="edit-event" data-id="${item.id}">Editar</button> <button class="btn small danger" data-action="delete-event" data-id="${item.id}">Eliminar</button></div></div>`).join("")}</div>`;
       }
 
       if (adminView === "drivers") {
@@ -1506,10 +1519,10 @@
             <label>Copiloto<input class="input" name="codriver"></label>
             <label>Equipo<input class="input" name="team"></label>
             <label>Coche<input class="input" name="car"></label>
-            <label>Categoría<input class="input" name="category" placeholder="Rally2"></label>
+            <label>Categorías<input class="input" name="categories" placeholder="Rally2, Junior, Scratch"></label>
             <div class="admin-actions wide"><button class="btn" type="button" data-save-driver>Guardar piloto</button><button class="btn secondary" type="reset">Limpiar</button></div>
           </form>
-          <div class="mini-list">${eventDrivers().map(item => `<div class="mini-row"><div><strong>#${item.number} ${item.name}</strong><div class="team">${item.codriver ? `Copiloto: ${item.codriver} · ` : ""}${item.car} · ${item.category}</div></div><div><button class="btn small dark" data-action="edit-driver" data-id="${item.id}">Editar</button> <button class="btn small danger" data-action="delete-driver" data-id="${item.id}">Eliminar</button></div></div>`).join("") || `<div class="empty">Sin pilotos.</div>`}</div>`;
+          <div class="mini-list">${eventDrivers().map(item => `<div class="mini-row"><div><strong>#${item.number} ${item.name}</strong><div class="team">${item.codriver ? `Copiloto: ${item.codriver} · ` : ""}${item.car} · ${categoryText(item)}</div></div><div><button class="btn small dark" data-action="edit-driver" data-id="${item.id}">Editar</button> <button class="btn small danger" data-action="delete-driver" data-id="${item.id}">Eliminar</button></div></div>`).join("") || `<div class="empty">Sin pilotos.</div>`}</div>`;
       }
 
       if (adminView === "stages") {
@@ -1574,6 +1587,22 @@
           }).join("") || `<div class="empty">Sin abandonos.</div>`}</div>`;
       }
 
+      if (adminView === "export") {
+        panel.innerHTML = `<h3>Exportar clasificaciones PDF</h3>
+          <div class="notice">Genera un PDF listo para publicar con la clasificación general, un tramo concreto o todos los tramos junto con la general. Puedes exportar absoluta o una categoría concreta.</div>
+          <form id="pdfForm" class="form-grid">
+            <label>Documento<select name="pdfType">
+              <option value="all">Todos los tramos + general</option>
+              <option value="general">Solo general</option>
+              <option value="stage">Solo un tramo</option>
+            </select></label>
+            <label>Tramo<select name="stageId">${stageOpts}</select></label>
+            <label>Clasificación<select name="category">${categoryOpts}</select></label>
+            <div class="admin-actions wide"><button class="btn" type="button" data-export-pdf>Generar PDF</button></div>
+          </form>
+          <div class="notice"><strong>Formato:</strong> cabecera del evento, modalidad, filtro aplicado, tablas limpias con piloto/copiloto, categoría, tiempo y diferencia.</div>`;
+      }
+
       if (adminView === "api") {
         panel.innerHTML = `<h3>Conexión API Assetto Corsa</h3>
           <div class="notice">Este panel guarda la configuración y deja preparada la integración. Para producción conviene usar un backend propio que proteja el token, consulte tu servidor de Assetto Corsa y escriba resultados normalizados en esta misma estructura.</div>
@@ -1596,7 +1625,8 @@
     function fillForm(formId, values) {
       const form = document.getElementById(formId);
       if (!form) return;
-      Object.entries(values).forEach(([key, value]) => {
+      const formValues = form.elements.categories ? { ...values, categories: driverCategories(values).join(", ") } : values;
+      Object.entries(formValues).forEach(([key, value]) => {
         if (form.elements[key] && form.elements[key].type !== "file") form.elements[key].value = value ?? "";
       });
       form.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1640,7 +1670,8 @@
       const previous = values.id ? byId(data.events, values.id) : null;
       const file = form.elements.logoFile?.files?.[0];
       const logo = file ? await fileToOptimizedLogo(file) : (values.logo || previous?.logo || "");
-      const item = { id: values.id || uid("evt"), name: values.name, date: values.date, location: values.location, surface: values.surface, format: values.format || "rally", status: values.status, description: values.description, logo };
+      const nextOrder = values.order ? Number(values.order) : (data.events.length + 1);
+      const item = { id: values.id || uid("evt"), name: values.name, order: nextOrder, date: values.date, location: values.location, surface: values.surface, format: values.format || "rally", status: values.status, description: values.description, logo };
       data.events = values.id ? data.events.map(existing => existing.id === values.id ? item : existing) : [...data.events, item];
       data.activeEventId = item.id;
       form.reset();
@@ -1651,7 +1682,8 @@
       const values = Object.fromEntries(new FormData(form).entries());
       if (!values.number?.trim() || !values.name?.trim()) return showToast("Completa dorsal y piloto");
       const previous = values.id ? byId(data.drivers, values.id) : null;
-      const item = { id: values.id || uid("drv"), eventId: activeEventId(), number: values.number, name: values.name, codriver: values.codriver || "", team: values.team, car: values.car, category: values.category, status: previous?.status || "Activo" };
+      const categories = parseCategories(values.categories);
+      const item = { id: values.id || uid("drv"), eventId: activeEventId(), number: values.number, name: values.name, codriver: values.codriver || "", team: values.team, car: values.car, categories, category: categories[0] || "", status: previous?.status || "Activo" };
       data.drivers = values.id ? data.drivers.map(existing => existing.id === values.id ? item : existing) : [...data.drivers, item];
       form.reset();
       saveData("Piloto guardado");
@@ -1716,6 +1748,156 @@
       initSupabaseSync();
     }
 
+    function reorderEvents(eventId, direction) {
+      const ordered = sortedEvents();
+      const index = ordered.findIndex(event => event.id === eventId);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= ordered.length) return;
+      [ordered[index], ordered[target]] = [ordered[target], ordered[index]];
+      ordered.forEach((event, idx) => {
+        const original = byId(data.events, event.id);
+        if (original) original.order = idx + 1;
+      });
+      saveData("Orden de eventos actualizado");
+    }
+
+    function loadScriptOnce(src) {
+      return new Promise((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) return resolve();
+        const script = document.createElement("script");
+        script.src = src;
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+    }
+
+    async function ensurePdfLibs() {
+      if (!window.jspdf?.jsPDF) {
+        await loadScriptOnce("https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js");
+      }
+      if (!window.jspdf?.jsPDF?.API?.autoTable) {
+        await loadScriptOnce("https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.3/dist/jspdf.plugin.autotable.min.js");
+      }
+      return window.jspdf.jsPDF;
+    }
+
+    function pdfRows(stageIds, category) {
+      const rows = classificationForStages(stageIds, category).filter(row => row.hasTime);
+      const leader = rows.find(row => row.hasTime && !row.retired);
+      return rows.map((row, index) => {
+        const gap = leader ? row.total - leader.total : 0;
+        return [
+          String(index + 1),
+          String(row.driver.number || ""),
+          `${row.driver.name || ""}\n${row.driver.codriver || ""}`,
+          categoryText(row.driver),
+          formatTime(row.total),
+          gap ? `+${formatTime(gap)}` : "+0.0"
+        ];
+      });
+    }
+
+    function slug(value) {
+      return String(value || "clasificacion").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    }
+
+    function addPdfHeader(doc, event, subtitle) {
+      doc.setFillColor(0, 48, 95);
+      doc.rect(0, 0, 297, 25, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(17);
+      doc.text(event.name || "Assetto Corsa Community", 14, 11);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(`${event.date || ""} · ${event.location || "Online"} · ${event.format === "subida" ? "Formato subida" : "Formato rally"}`, 14, 18);
+      doc.setTextColor(0, 48, 95);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.text(subtitle, 14, 35);
+      doc.setDrawColor(0, 48, 95);
+      doc.setLineWidth(0.4);
+      doc.line(14, 38, 283, 38);
+    }
+
+    function addPdfFooter(doc) {
+      const pages = doc.internal.getNumberOfPages();
+      for (let page = 1; page <= pages; page++) {
+        doc.setPage(page);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(90, 106, 118);
+        doc.text("Assetto Corsa Community · Tiempos Online.", 14, 203);
+        doc.text(`Página ${page} / ${pages}`, 270, 203, { align: "right" });
+      }
+    }
+
+    function addPdfTable(doc, title, rows, startY) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(0, 48, 95);
+      doc.text(title, 14, startY);
+      doc.autoTable({
+        startY: startY + 4,
+        head: [["Pos", "N", "Piloto / copiloto", "Cat", "Tiempo", "Dif"]],
+        body: rows.length ? rows : [["-", "-", "Sin tiempos para este filtro", "-", "-", "-"]],
+        theme: "grid",
+        styles: { font: "helvetica", fontSize: 8, cellPadding: 2.4, lineColor: [218, 224, 230], lineWidth: 0.15, valign: "middle" },
+        headStyles: { fillColor: [0, 48, 95], textColor: [255, 255, 255], fontStyle: "bold" },
+        alternateRowStyles: { fillColor: [245, 246, 247] },
+        columnStyles: {
+          0: { halign: "center", cellWidth: 14 },
+          1: { halign: "center", cellWidth: 14 },
+          2: { cellWidth: 98 },
+          3: { cellWidth: 58 },
+          4: { halign: "right", cellWidth: 28 },
+          5: { halign: "right", cellWidth: 24 }
+        },
+        margin: { left: 14, right: 14 }
+      });
+      return doc.lastAutoTable.finalY + 10;
+    }
+
+    async function exportPdf(form) {
+      const values = Object.fromEntries(new FormData(form).entries());
+      const event = activeEvent();
+      const category = values.category || "absolute";
+      const categoryLabel = category === "absolute" ? "Absoluta" : category;
+      const stages = eventStages();
+      const jsPDF = await ensurePdfLibs();
+      const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      const subtitle = `${categoryLabel} · ${new Date().toLocaleDateString("es-ES")}`;
+      addPdfHeader(doc, event, subtitle);
+      let y = 48;
+
+      if (values.pdfType === "general" || values.pdfType === "all") {
+        const title = event.format === "subida" ? "Clasificación general (dos mejores tiempos)" : "Clasificación general";
+        y = addPdfTable(doc, title, pdfRows(stages.map(stage => stage.id), category), y);
+      }
+
+      if (values.pdfType === "stage") {
+        const stage = byId(data.stages, values.stageId) || stages[0];
+        y = addPdfTable(doc, `${stage.code} · ${stage.name}`, pdfRows([stage.id], category), y);
+      }
+
+      if (values.pdfType === "all") {
+        stages.forEach(stage => {
+          if (y > 160) {
+            doc.addPage();
+            addPdfHeader(doc, event, subtitle);
+            y = 48;
+          }
+          y = addPdfTable(doc, `${stage.code} · ${stage.name}`, pdfRows([stage.id], category), y);
+        });
+      }
+
+      addPdfFooter(doc);
+      const typeName = values.pdfType === "stage" ? "tramo" : values.pdfType === "general" ? "general" : "completo";
+      doc.save(`${slug(event.name)}-${typeName}-${slug(categoryLabel)}.pdf`);
+      showToast("PDF generado");
+    }
+
     document.addEventListener("click", async event => {
       const loginBtn = event.target.closest("#directorLogin");
       if (loginBtn) {
@@ -1760,6 +1942,14 @@
           handler(button.closest("form"));
           return;
         }
+      }
+
+      const exportPdfBtn = event.target.closest("[data-export-pdf]");
+      if (exportPdfBtn) {
+        event.preventDefault();
+        showToast("Generando PDF...");
+        await exportPdf(exportPdfBtn.closest("form"));
+        return;
       }
 
       const homeBtn = event.target.closest("[data-go-home]");
@@ -1841,6 +2031,8 @@
 
       if (action === "activate-event") { data.activeEventId = id; currentStage = "general"; saveData("Evento publicado"); }
       if (action === "edit-event") fillForm("eventForm", byId(data.events, id));
+      if (action === "move-event-up") reorderEvents(id, -1);
+      if (action === "move-event-down") reorderEvents(id, 1);
       if (action === "delete-event" && confirm("¿Eliminar evento y todos sus datos?")) {
         data.events = data.events.filter(item => item.id !== id);
         ["drivers","stages","times","penalties","retirements"].forEach(key => data[key] = data[key].filter(item => item.eventId !== id));
