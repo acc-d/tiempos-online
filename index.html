@@ -1626,6 +1626,11 @@
 
       if (adminView === "drivers") {
         panel.innerHTML = `<h3>Pilotos de ${event.name}</h3>
+          <div class="notice"><strong>Importar inscritos desde Excel:</strong> usa columnas Dorsal, Equipo, Piloto, Copiloto, Coche y Categorías. Si un dorsal ya existe en este evento, se actualiza.</div>
+          <div class="form-grid">
+            <label class="wide">Archivo Excel<input class="input" id="driverExcelFile" type="file" accept=".xlsx,.xls,.csv"></label>
+            <div class="admin-actions wide"><button class="btn dark" type="button" data-import-drivers>Importar pilotos desde Excel</button></div>
+          </div>
           <form id="driverForm" class="form-grid">
             <input type="hidden" name="id">
             <label>Dorsal<input class="input" name="number" required></label>
@@ -1811,6 +1816,87 @@
       data.drivers = values.id ? data.drivers.map(existing => existing.id === values.id ? item : existing) : [...data.drivers, item];
       form.reset();
       saveData("Piloto guardado");
+    }
+
+    async function ensureXlsxLib() {
+      if (!window.XLSX) {
+        await loadScriptOnce("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js");
+      }
+      return window.XLSX;
+    }
+
+    function excelHeaderKey(value) {
+      return String(value || "")
+        .trim()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+    }
+
+    function excelCell(row, headers, names) {
+      const keys = names.map(excelHeaderKey);
+      const index = headers.findIndex(header => keys.includes(header));
+      return index >= 0 ? String(row[index] ?? "").trim() : "";
+    }
+
+    function readFileAsArrayBuffer(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    async function importDriversFromExcel(input) {
+      const file = input?.files?.[0];
+      if (!file) return showToast("Selecciona un archivo Excel");
+      try {
+        const XLSX = await ensureXlsxLib();
+        const buffer = await readFileAsArrayBuffer(file);
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+        if (rows.length < 2) return showToast("El Excel no tiene pilotos");
+
+        const headers = rows[0].map(excelHeaderKey);
+        let imported = 0;
+        let updated = 0;
+        rows.slice(1).forEach(row => {
+          const number = excelCell(row, headers, ["Dorsal", "Numero", "N"]);
+          const name = excelCell(row, headers, ["Piloto", "Nombre"]);
+          if (!number || !name) return;
+          const previous = data.drivers.find(driver => driver.eventId === activeEventId() && String(driver.number).trim() === number);
+          const categories = parseCategories(excelCell(row, headers, ["Categorías", "Categorias", "Categoria", "Categoría"]));
+          const item = {
+            id: previous?.id || uid("drv"),
+            eventId: activeEventId(),
+            number,
+            name,
+            codriver: excelCell(row, headers, ["Copiloto", "Co-piloto", "Navegante"]),
+            team: excelCell(row, headers, ["Equipo", "Escuderia", "Escudería"]),
+            car: excelCell(row, headers, ["Coche", "Vehiculo", "Vehículo", "Auto"]),
+            categories,
+            category: categories[0] || "",
+            status: previous?.status || "Activo"
+          };
+          if (previous) {
+            data.drivers = data.drivers.map(driver => driver.id === previous.id ? item : driver);
+            updated += 1;
+          } else {
+            data.drivers = [...data.drivers, item];
+            imported += 1;
+          }
+        });
+
+        input.value = "";
+        if (!imported && !updated) return showToast("No se encontraron pilotos válidos");
+        saveData(`${imported} pilotos importados · ${updated} actualizados`);
+      } catch (error) {
+        console.error("Error importando Excel", error);
+        showToast("No se pudo importar el Excel");
+      }
     }
 
     function saveStageForm(form) {
@@ -2077,6 +2163,13 @@
         event.preventDefault();
         showToast("Generando PDF...");
         await exportPdf(exportPdfBtn.closest("form"));
+        return;
+      }
+
+      const importDriversBtn = event.target.closest("[data-import-drivers]");
+      if (importDriversBtn) {
+        event.preventDefault();
+        await importDriversFromExcel(document.getElementById("driverExcelFile"));
         return;
       }
 
