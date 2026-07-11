@@ -1269,7 +1269,6 @@
       return rows.sort((a, b) => {
         if (a.retired !== b.retired) return a.retired ? 1 : -1;
         if (a.hasTime !== b.hasTime) return a.hasTime ? -1 : 1;
-        if (stageId === "general" && activeEvent()?.format !== "subida" && a.completedStages !== b.completedStages) return b.completedStages - a.completedStages;
         return a.total - b.total;
       });
     }
@@ -1308,9 +1307,12 @@
       return rows.sort((a, b) => {
         if (a.retired !== b.retired) return a.retired ? 1 : -1;
         if (a.hasTime !== b.hasTime) return a.hasTime ? -1 : 1;
-        if (!isHillclimbGeneral && a.completedStages !== b.completedStages) return b.completedStages - a.completedStages;
         return a.total - b.total;
       });
+    }
+
+    function driverHasTimesForStages(driverId, stageIds) {
+      return stageIds.every(stageId => eventTimes().some(time => time.driverId === driverId && time.stageId === stageId));
     }
 
     function renderAll() {
@@ -1414,7 +1416,12 @@
       if (tab === "penalties") return `<div class="content-card">${incidentTable("penalties")}</div>`;
       if (tab === "retirements") return `<div class="content-card">${incidentTable("retirements")}</div>`;
       if (tab === "drivers") return `<div class="content-card">${driversTable()}</div>`;
-      if (tab === "general") return `<div class="content-card">${activeEvent()?.format === "subida" ? `<div class="notice">Formato subida: la general suma los dos mejores tiempos de cada piloto entre los tramos disputados.</div>` : ""}${classificationTable(classificationForStages(eventStages().map(stage => stage.id)), "Clasificación general")}</div>`;
+      if (tab === "general") {
+        const timedStageIds = eventStages().filter(stage => eventTimes().some(time => time.stageId === stage.id)).map(stage => stage.id);
+        const stageIds = timedStageIds.length ? timedStageIds : eventStages().map(stage => stage.id);
+        const generalRows = classificationForStages(stageIds).filter(row => row.hasTime && (activeEvent()?.format === "subida" || driverHasTimesForStages(row.driver.id, stageIds)));
+        return `<div class="content-card">${activeEvent()?.format === "subida" ? `<div class="notice">Formato subida: la general suma los dos mejores tiempos de cada piloto entre los tramos disputados.</div>` : ""}${classificationTable(generalRows, "Clasificación general")}</div>`;
+      }
       return "";
     }
 
@@ -1445,7 +1452,11 @@
       const categories = [...new Set(eventDrivers().flatMap(driver => driverCategories(driver)).filter(Boolean))];
       const stageRows = classificationForStages([stage.id], categoryFilter).filter(row => row.hasTime);
       const driversWithCurrentStageTime = new Set(eventTimes().filter(time => time.stageId === stage.id).map(time => time.driverId));
-      const generalRows = classificationForStages(untilStageIds, categoryFilter).filter(row => row.hasTime && driversWithCurrentStageTime.has(row.driver.id));
+      const generalRows = classificationForStages(untilStageIds, categoryFilter).filter(row =>
+        row.hasTime && (activeEvent()?.format === "subida"
+          ? driversWithCurrentStageTime.has(row.driver.id)
+          : driverHasTimesForStages(row.driver.id, untilStageIds))
+      );
       document.getElementById("publicApp").innerHTML = `
         <div class="public-wrap">
           <div class="back-row"><button class="back-link" data-back-event type="button">← Volver</button></div>
@@ -2011,7 +2022,9 @@
     }
 
     function pdfRows(stageIds, category) {
-      const rows = classificationForStages(stageIds, category).filter(row => row.hasTime);
+      const rows = classificationForStages(stageIds, category).filter(row =>
+        row.hasTime && (activeEvent()?.format === "subida" || stageIds.length <= 1 || driverHasTimesForStages(row.driver.id, stageIds))
+      );
       const leader = rows.find(row => row.hasTime && !row.retired);
       return rows.map((row, index) => {
         const gap = leader ? row.total - leader.total : 0;
