@@ -561,6 +561,43 @@
       margin: 0 auto;
       padding: 0 0 32px;
     }
+    .loading-state {
+      min-height: calc(100vh - 154px);
+      display: grid;
+      place-items: center;
+      padding: 36px 18px;
+    }
+    .loading-card {
+      width: min(420px, 100%);
+      background: #fff;
+      border: 1px solid #d8dee3;
+      border-radius: 8px;
+      padding: 28px;
+      text-align: center;
+      color: #00305f;
+      box-shadow: 0 12px 34px rgba(0,0,0,.1);
+    }
+    .loading-spinner {
+      width: 42px;
+      height: 42px;
+      margin: 0 auto 16px;
+      border: 4px solid #dce6ec;
+      border-top-color: #00305f;
+      border-radius: 999px;
+      animation: spin .8s linear infinite;
+    }
+    .loading-card strong {
+      display: block;
+      font-size: 18px;
+      text-transform: uppercase;
+    }
+    .loading-card span {
+      display: block;
+      margin-top: 8px;
+      color: #596a76;
+      font-size: 14px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .public-title {
       margin: 28px 0 18px;
       color: #003a70;
@@ -995,6 +1032,7 @@
     let remoteApplying = false;
     let supabaseClient = null;
     let supabaseChannel = null;
+    let initialSyncPending = hasSupabaseConfig(data);
     const liveChannel = "BroadcastChannel" in window ? new BroadcastChannel("acc-rally-live") : null;
 
     function loadData() {
@@ -1021,6 +1059,11 @@
 
     function normalizeSupabaseUrl(url) {
       return String(url || "").trim().replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
+    }
+
+    function hasSupabaseConfig(source = data) {
+      const cfg = source.api || {};
+      return Boolean(cfg.supabaseUrl && cfg.supabaseAnonKey && cfg.supabaseTable && cfg.supabaseRowId);
     }
 
     function saveData(message = "Guardado") {
@@ -1060,7 +1103,11 @@
 
     async function initSupabaseSync() {
       const cfg = data.api || {};
-      if (!cfg.supabaseUrl || !cfg.supabaseAnonKey || !cfg.supabaseTable || !cfg.supabaseRowId) return;
+      if (!hasSupabaseConfig()) {
+        initialSyncPending = false;
+        renderAll();
+        return;
+      }
       try {
         await ensureSupabaseClient();
         const { data: remote } = await supabaseClient
@@ -1068,17 +1115,22 @@
           .select("state")
           .eq("id", cfg.supabaseRowId)
           .maybeSingle();
-        if (remote?.state) applyRemoteData(remote.state, "Datos cargados de Supabase");
+        if (remote?.state) applyRemoteData(remote.state, "Actualización correcta");
         if (cfg.realtime !== false && !supabaseChannel) {
           supabaseChannel = supabaseClient
             .channel("acc-rally-state")
             .on("postgres_changes", { event: "*", schema: "public", table: cfg.supabaseTable, filter: `id=eq.${cfg.supabaseRowId}` }, payload => {
-              if (payload.new?.state) applyRemoteData(payload.new.state, "Actualizado desde Supabase");
+              if (payload.new?.state) applyRemoteData(payload.new.state, "Actualización correcta");
             })
             .subscribe();
         }
       } catch (error) {
         console.warn("Supabase no conectado", error);
+      } finally {
+        if (initialSyncPending) {
+          initialSyncPending = false;
+          renderAll();
+        }
       }
     }
 
@@ -1265,9 +1317,21 @@
     }
 
     function renderPublic() {
+      if (initialSyncPending) return renderLoadingState();
       if (publicView === "stage") return renderStageDetail();
       if (publicView === "event") return renderEventDetail();
       renderHome();
+    }
+
+    function renderLoadingState() {
+      document.getElementById("publicApp").innerHTML = `
+        <div class="loading-state">
+          <div class="loading-card" role="status" aria-live="polite">
+            <div class="loading-spinner" aria-hidden="true"></div>
+            <strong>Cargando datos</strong>
+            <span>Sincronizando tiempos online...</span>
+          </div>
+        </div>`;
     }
 
     function renderHome() {
@@ -1810,6 +1874,7 @@
       };
       supabaseChannel = null;
       supabaseClient = null;
+      initialSyncPending = hasSupabaseConfig();
       saveData("Configuración API guardada");
       initSupabaseSync();
     }
