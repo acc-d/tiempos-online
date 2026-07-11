@@ -1243,19 +1243,24 @@
       const isHillclimb = activeEvent()?.format === "subida";
       const rows = eventDrivers().map(driver => {
         const driverTimes = eventTimes().filter(time => time.driverId === driver.id && (stageId === "general" || time.stageId === stageId));
-        const scoringTimes = isGeneral && isHillclimb
-          ? [...driverTimes].sort((a, b) => Number(a.seconds || 0) - Number(b.seconds || 0)).slice(0, 2)
-          : driverTimes;
-        const raw = scoringTimes.reduce((sum, item) => sum + Number(item.seconds || 0), 0);
-        const penalty = eventPenalties()
-          .filter(item => item.driverId === driver.id && (stageId === "general" || item.stageId === stageId))
-          .reduce((sum, item) => sum + Number(item.seconds || 0), 0);
+        const driverStageResults = driverTimes.map(time => {
+          const penalty = eventPenalties()
+            .filter(item => item.driverId === driver.id && item.stageId === time.stageId)
+            .reduce((sum, item) => sum + Number(item.seconds || 0), 0);
+          const raw = Number(time.seconds || 0);
+          return { raw, penalty, total: raw + penalty };
+        });
+        const scoringResults = isGeneral && isHillclimb
+          ? [...driverStageResults].sort((a, b) => a.total - b.total).slice(0, 2)
+          : driverStageResults;
+        const raw = scoringResults.reduce((sum, item) => sum + item.raw, 0);
+        const penalty = scoringResults.reduce((sum, item) => sum + item.penalty, 0);
         return {
           driver,
           raw,
           penalty,
           total: raw + penalty,
-          completedStages: scoringTimes.length,
+          completedStages: scoringResults.length,
           enteredStages: driverTimes.length,
           hasTime: driverTimes.length > 0,
           retired: retireIds.has(driver.id) || driver.status === "Abandono"
@@ -1277,19 +1282,24 @@
         .filter(driver => selectedCategory === "absolute" || driverCategories(driver).includes(selectedCategory))
         .map(driver => {
           const driverTimes = eventTimes().filter(time => time.driverId === driver.id && stageSet.has(time.stageId));
-          const scoringTimes = isHillclimbGeneral
-            ? [...driverTimes].sort((a, b) => Number(a.seconds || 0) - Number(b.seconds || 0)).slice(0, 2)
-            : driverTimes;
-          const raw = scoringTimes.reduce((sum, item) => sum + Number(item.seconds || 0), 0);
-          const penalty = eventPenalties()
-            .filter(item => item.driverId === driver.id && stageSet.has(item.stageId))
-            .reduce((sum, item) => sum + Number(item.seconds || 0), 0);
+          const driverStageResults = driverTimes.map(time => {
+            const penalty = eventPenalties()
+              .filter(item => item.driverId === driver.id && item.stageId === time.stageId)
+              .reduce((sum, item) => sum + Number(item.seconds || 0), 0);
+            const raw = Number(time.seconds || 0);
+            return { raw, penalty, total: raw + penalty };
+          });
+          const scoringResults = isHillclimbGeneral
+            ? [...driverStageResults].sort((a, b) => a.total - b.total).slice(0, 2)
+            : driverStageResults;
+          const raw = scoringResults.reduce((sum, item) => sum + item.raw, 0);
+          const penalty = scoringResults.reduce((sum, item) => sum + item.penalty, 0);
           return {
             driver,
             raw,
             penalty,
             total: raw + penalty,
-            completedStages: scoringTimes.length,
+            completedStages: scoringResults.length,
             enteredStages: driverTimes.length,
             hasTime: driverTimes.length > 0,
             retired: retireIds.has(driver.id) || driver.status === "Abandono"
@@ -1434,7 +1444,8 @@
       const untilStageIds = stages.slice(0, stageIndex + 1).map(item => item.id);
       const categories = [...new Set(eventDrivers().flatMap(driver => driverCategories(driver)).filter(Boolean))];
       const stageRows = classificationForStages([stage.id], categoryFilter).filter(row => row.hasTime);
-      const generalRows = classificationForStages(untilStageIds, categoryFilter).filter(row => row.hasTime);
+      const driversWithCurrentStageTime = new Set(eventTimes().filter(time => time.stageId === stage.id).map(time => time.driverId));
+      const generalRows = classificationForStages(untilStageIds, categoryFilter).filter(row => row.hasTime && driversWithCurrentStageTime.has(row.driver.id));
       document.getElementById("publicApp").innerHTML = `
         <div class="public-wrap">
           <div class="back-row"><button class="back-link" data-back-event type="button">← Volver</button></div>
