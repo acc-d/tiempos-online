@@ -1237,6 +1237,18 @@
       return Number.isFinite(n) ? n : null;
     }
 
+    function compareClassificationRows(a, b) {
+      if (a.retired !== b.retired) return a.retired ? 1 : -1;
+      if (a.hasTime !== b.hasTime) return a.hasTime ? -1 : 1;
+      const totalDiff = Number(a.total || 0) - Number(b.total || 0);
+      if (totalDiff) return totalDiff;
+      return Number(a.driver?.number || 0) - Number(b.driver?.number || 0);
+    }
+
+    function sortClassificationRows(rows) {
+      return [...rows].sort(compareClassificationRows);
+    }
+
     function classification(stageId = "general") {
       const retireIds = new Set(eventRetirements().map(item => item.driverId));
       const isGeneral = stageId === "general";
@@ -1266,11 +1278,7 @@
           retired: retireIds.has(driver.id) || driver.status === "Abandono"
         };
       });
-      return rows.sort((a, b) => {
-        if (a.retired !== b.retired) return a.retired ? 1 : -1;
-        if (a.hasTime !== b.hasTime) return a.hasTime ? -1 : 1;
-        return a.total - b.total;
-      });
+      return sortClassificationRows(rows);
     }
 
     function classificationForStages(stageIds, selectedCategory = "absolute") {
@@ -1304,11 +1312,7 @@
             retired: retireIds.has(driver.id) || driver.status === "Abandono"
           };
         });
-      return rows.sort((a, b) => {
-        if (a.retired !== b.retired) return a.retired ? 1 : -1;
-        if (a.hasTime !== b.hasTime) return a.hasTime ? -1 : 1;
-        return a.total - b.total;
-      });
+      return sortClassificationRows(rows);
     }
 
     function driverHasTimesForStages(driverId, stageIds) {
@@ -1475,12 +1479,13 @@
     }
 
     function classificationTable(rows, title, compact = false) {
-      const leader = rows.find(row => row.hasTime && !row.retired);
+      const sortedRows = sortClassificationRows(rows);
+      const leader = sortedRows.find(row => row.hasTime && !row.retired);
       return `<div class="result-panel">
         <h3>${title}</h3>
         <table>
           <thead><tr><th>Pos</th><th>N</th><th>Equipo</th><th>Cat</th><th>${compact ? "Tiempo" : "Total"}</th><th>Dif</th></tr></thead>
-          <tbody>${rows.length ? rows.map((row, index) => {
+          <tbody>${sortedRows.length ? sortedRows.map((row, index) => {
             const gap = leader ? row.total - leader.total : 0;
             return `<tr>
               <td class="pos-cell">${index + 1}</td>
@@ -2022,9 +2027,9 @@
     }
 
     function pdfRows(stageIds, category) {
-      const rows = classificationForStages(stageIds, category).filter(row =>
+      const rows = sortClassificationRows(classificationForStages(stageIds, category).filter(row =>
         row.hasTime && (activeEvent()?.format === "subida" || stageIds.length <= 1 || driverHasTimesForStages(row.driver.id, stageIds))
-      );
+      ));
       const leader = rows.find(row => row.hasTime && !row.retired);
       return rows.map((row, index) => {
         const gap = leader ? row.total - leader.total : 0;
