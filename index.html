@@ -1238,7 +1238,6 @@
     }
 
     function compareClassificationRows(a, b) {
-      if (a.retired !== b.retired) return a.retired ? 1 : -1;
       if (a.hasTime !== b.hasTime) return a.hasTime ? -1 : 1;
       const totalDiff = Number(a.total || 0) - Number(b.total || 0);
       if (totalDiff) return totalDiff;
@@ -1480,7 +1479,7 @@
 
     function classificationTable(rows, title, compact = false) {
       const sortedRows = sortClassificationRows(rows);
-      const leader = sortedRows.find(row => row.hasTime && !row.retired);
+      const leader = sortedRows.find(row => row.hasTime);
       return `<div class="result-panel">
         <h3>${title}</h3>
         <table>
@@ -1538,7 +1537,7 @@
 
     function renderMetrics() {
       const rows = classification();
-      const leader = rows.find(row => row.hasTime && !row.retired);
+      const leader = rows.find(row => row.hasTime);
       const completed = eventTimes().length;
       document.getElementById("metrics").innerHTML = [
         ["Líder", leader ? leader.driver.name : "-"],
@@ -1560,11 +1559,11 @@
         const haystack = `${row.driver.name} ${row.driver.codriver || ""} ${row.driver.team} ${row.driver.car} ${categoryText(row.driver)}`.toLowerCase();
         return haystack.includes(query);
       });
-      const leader = rows.find(row => row.hasTime && !row.retired);
+      const leader = rows.find(row => row.hasTime);
       document.getElementById("classificationBody").innerHTML = rows.length ? rows.map((row, index) => {
-        const gap = leader && row.hasTime && !row.retired ? row.total - leader.total : null;
+        const gap = leader && row.hasTime ? row.total - leader.total : null;
         return `<tr>
-          <td class="rank">${row.retired || !row.hasTime ? "-" : index + 1}</td>
+          <td class="rank">${row.hasTime ? index + 1 : "-"}</td>
           <td><div class="pilot">#${row.driver.number} ${row.driver.name}</div><div class="team">${row.driver.codriver || row.driver.team}</div></td>
           <td>${row.driver.car}</td>
           <td><span class="badge">${categoryText(row.driver)}</span></td>
@@ -2030,7 +2029,7 @@
       const rows = sortClassificationRows(classificationForStages(stageIds, category).filter(row =>
         row.hasTime && (activeEvent()?.format === "subida" || stageIds.length <= 1 || driverHasTimesForStages(row.driver.id, stageIds))
       ));
-      const leader = rows.find(row => row.hasTime && !row.retired);
+      const leader = rows.find(row => row.hasTime);
       return rows.map((row, index) => {
         const gap = leader ? row.total - leader.total : 0;
         return [
