@@ -1048,6 +1048,7 @@
       const merged = { ...structuredClone(defaultData), ...source, api: { ...defaultData.api, ...(source?.api || {}) } };
       merged.api.supabaseUrl = normalizeSupabaseUrl(merged.api.supabaseUrl);
       merged.events = (merged.events || []).map((event, index) => ({ format: "rally", order: index + 1, ...event }));
+      merged.stages = (merged.stages || []).map(stage => ({ countsForGeneral: true, ...stage, countsForGeneral: stage.countsForGeneral !== false }));
       merged.drivers = (merged.drivers || []).map(driver => {
         const categories = Array.isArray(driver.categories)
           ? driver.categories
@@ -1192,6 +1193,8 @@
     const activeEventId = () => activeEvent()?.id;
     const eventDrivers = () => data.drivers.filter(item => item.eventId === activeEventId());
     const eventStages = () => data.stages.filter(item => item.eventId === activeEventId());
+    const stageCountsForGeneral = stage => stage?.countsForGeneral !== false;
+    const generalStageIds = stages => stages.filter(stageCountsForGeneral).map(stage => stage.id);
     const eventTimes = () => data.times.filter(item => item.eventId === activeEventId());
     const eventPenalties = () => data.penalties.filter(item => item.eventId === activeEventId());
     const eventRetirements = () => data.retirements.filter(item => item.eventId === activeEventId());
@@ -1253,7 +1256,10 @@
       const isGeneral = stageId === "general";
       const isHillclimb = activeEvent()?.format === "subida";
       const rows = eventDrivers().map(driver => {
-        const driverTimes = eventTimes().filter(time => time.driverId === driver.id && (stageId === "general" || time.stageId === stageId));
+        const driverTimes = eventTimes().filter(time => {
+          const stage = byId(data.stages, time.stageId);
+          return time.driverId === driver.id && (stageId === "general" ? stageCountsForGeneral(stage) : time.stageId === stageId);
+        });
         const driverStageResults = driverTimes.map(time => {
           const penalty = eventPenalties()
             .filter(item => item.driverId === driver.id && item.stageId === time.stageId)
@@ -1420,8 +1426,9 @@
       if (tab === "retirements") return `<div class="content-card">${incidentTable("retirements")}</div>`;
       if (tab === "drivers") return `<div class="content-card">${driversTable()}</div>`;
       if (tab === "general") {
-        const timedStageIds = eventStages().filter(stage => eventTimes().some(time => time.stageId === stage.id)).map(stage => stage.id);
-        const stageIds = timedStageIds.length ? timedStageIds : eventStages().map(stage => stage.id);
+        const scoringStages = eventStages().filter(stageCountsForGeneral);
+        const timedStageIds = scoringStages.filter(stage => eventTimes().some(time => time.stageId === stage.id)).map(stage => stage.id);
+        const stageIds = timedStageIds.length ? timedStageIds : generalStageIds(eventStages());
         const generalRows = classificationForStages(stageIds).filter(row => row.hasTime && (activeEvent()?.format === "subida" || driverHasTimesForStages(row.driver.id, stageIds)));
         return `<div class="content-card">${activeEvent()?.format === "subida" ? `<div class="notice">Formato subida: la general suma los dos mejores tiempos de cada piloto entre los tramos disputados.</div>` : ""}${classificationTable(generalRows, "Clasificación general")}</div>`;
       }
@@ -1451,13 +1458,13 @@
       }
       selectedStageId = stage.id;
       const stageIndex = stages.findIndex(item => item.id === stage.id);
-      const untilStageIds = stages.slice(0, stageIndex + 1).map(item => item.id);
+      const untilStageIds = generalStageIds(stages.slice(0, stageIndex + 1));
       const categories = [...new Set(eventDrivers().flatMap(driver => driverCategories(driver)).filter(Boolean))];
       const stageRows = classificationForStages([stage.id], categoryFilter).filter(row => row.hasTime);
       const driversWithCurrentStageTime = new Set(eventTimes().filter(time => time.stageId === stage.id).map(time => time.driverId));
       const generalRows = classificationForStages(untilStageIds, categoryFilter).filter(row =>
         row.hasTime && (activeEvent()?.format === "subida"
-          ? driversWithCurrentStageTime.has(row.driver.id)
+          ? (stageCountsForGeneral(stage) ? driversWithCurrentStageTime.has(row.driver.id) : true)
           : driverHasTimesForStages(row.driver.id, untilStageIds))
       );
       document.getElementById("publicApp").innerHTML = `
@@ -1678,9 +1685,10 @@
             <label>Nombre<input class="input" name="name" required></label>
             <label>Km<input class="input" name="distance" type="number" step="0.1"></label>
             <label>Estado<select name="status"><option>Pendiente</option><option>En curso</option><option>Finalizado</option><option>Neutralizado</option></select></label>
+            <label>General<select name="countsForGeneral"><option value="true">Cuenta para la general</option><option value="false">No cuenta para la general</option></select></label>
             <div class="admin-actions wide"><button class="btn" type="button" data-save-stage>Guardar tramo</button><button class="btn secondary" type="reset">Limpiar</button></div>
           </form>
-          <div class="mini-list">${eventStages().map(item => `<div class="mini-row"><div><strong>${item.code} ${item.name}</strong><div class="team">${item.distance} km · ${item.status}</div></div><div><button class="btn small dark" data-action="edit-stage" data-id="${item.id}">Editar</button> <button class="btn small danger" data-action="delete-stage" data-id="${item.id}">Eliminar</button></div></div>`).join("") || `<div class="empty">Sin tramos.</div>`}</div>`;
+          <div class="mini-list">${eventStages().map(item => `<div class="mini-row"><div><strong>${item.code} ${item.name}</strong><div class="team">${item.distance} km · ${item.status} · ${stageCountsForGeneral(item) ? "Cuenta para general" : "No cuenta para general"}</div></div><div><button class="btn small dark" data-action="edit-stage" data-id="${item.id}">Editar</button> <button class="btn small danger" data-action="delete-stage" data-id="${item.id}">Eliminar</button></div></div>`).join("") || `<div class="empty">Sin tramos.</div>`}</div>`;
       }
 
       if (adminView === "times") {
@@ -1928,7 +1936,7 @@
     function saveStageForm(form) {
       const values = Object.fromEntries(new FormData(form).entries());
       if (!values.code?.trim() || !values.name?.trim()) return showToast("Completa código y nombre del tramo");
-      const item = { id: values.id || uid("stg"), eventId: activeEventId(), code: values.code, name: values.name, distance: Number(values.distance || 0), status: values.status };
+      const item = { id: values.id || uid("stg"), eventId: activeEventId(), code: values.code, name: values.name, distance: Number(values.distance || 0), status: values.status, countsForGeneral: values.countsForGeneral !== "false" };
       data.stages = values.id ? data.stages.map(existing => existing.id === values.id ? item : existing) : [...data.stages, item];
       form.reset();
       saveData("Tramo guardado");
@@ -2118,7 +2126,7 @@
 
       if (values.pdfType === "general" || values.pdfType === "all") {
         const title = event.format === "subida" ? "Clasificación general (dos mejores tiempos)" : "Clasificación general";
-        y = addPdfTable(doc, title, pdfRows(stages.map(stage => stage.id), category), y);
+        y = addPdfTable(doc, title, pdfRows(generalStageIds(stages), category), y);
       }
 
       if (values.pdfType === "stage") {
