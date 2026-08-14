@@ -755,7 +755,7 @@
     }
     .stage-strip {
       display: grid;
-      grid-template-columns: 64px 1fr 180px 110px;
+      grid-template-columns: 64px 1fr 110px;
       gap: 12px;
       align-items: center;
       width: 100%;
@@ -1439,12 +1439,10 @@
 
     function stageStrips() {
       return eventStages().map((stage, index) => {
-        const finishedCount = classificationForStages([stage.id]).filter(row => row.hasTime && !row.retired).length;
         const isLive = stage.status === "En curso";
         return `<button class="stage-strip" data-open-stage="${stage.id}">
           <span class="stage-code ${isLive ? "live" : ""}">${esc(stage.code)}</span>
           <span><span class="stage-title">${esc(stage.name)}</span><span class="stage-sub">${esc(stage.distance)} km</span></span>
-          <span class="mono">${finishedCount} participantes en meta</span>
           <span class="stage-status">${esc(stage.status)}</span>
         </button>`;
       }).join("") || `<div class="content-card">Todavía no hay tramos en este evento.</div>`;
