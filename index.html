@@ -1032,6 +1032,8 @@
     let remoteApplying = false;
     let supabaseClient = null;
     let supabaseChannel = null;
+    let supabasePollTimer = null;
+    let lastDataFingerprint = "";
     let initialSyncPending = hasSupabaseConfig(data);
     const liveChannel = "BroadcastChannel" in window ? new BroadcastChannel("acc-rally-live") : null;
 
@@ -1067,9 +1069,19 @@
       return Boolean(cfg.supabaseUrl && cfg.supabaseAnonKey && cfg.supabaseTable && cfg.supabaseRowId);
     }
 
+    function dataFingerprint(source) {
+      try {
+        return JSON.stringify(normalizeData(source));
+      } catch {
+        return "";
+      }
+    }
+    lastDataFingerprint = dataFingerprint(data);
+
     function saveData(message = "Guardado") {
       try {
         localStorage.setItem(storeKey, JSON.stringify(data));
+        lastDataFingerprint = dataFingerprint(data);
         showToast(message);
         renderAll();
         notifyLocalLive();
@@ -1081,12 +1093,17 @@
     }
 
     function applyRemoteData(nextData, message = "Datos actualizados") {
+      const normalized = normalizeData(nextData);
+      const nextFingerprint = dataFingerprint(normalized);
+      if (nextFingerprint && nextFingerprint === lastDataFingerprint) return false;
       remoteApplying = true;
-      data = normalizeData(nextData);
+      data = normalized;
+      lastDataFingerprint = nextFingerprint;
       localStorage.setItem(storeKey, JSON.stringify(data));
       renderAll();
-      showToast(message);
+      if (message) showToast(message);
       remoteApplying = false;
+      return true;
     }
 
     function notifyLocalLive() {
@@ -1111,12 +1128,7 @@
       }
       try {
         await ensureSupabaseClient();
-        const { data: remote } = await supabaseClient
-          .from(cfg.supabaseTable)
-          .select("state")
-          .eq("id", cfg.supabaseRowId)
-          .maybeSingle();
-        if (remote?.state) applyRemoteData(remote.state, "Actualización correcta");
+        await fetchSupabaseState("Actualización correcta");
         if (cfg.realtime !== false && !supabaseChannel) {
           supabaseChannel = supabaseClient
             .channel("acc-rally-state")
@@ -1125,6 +1137,7 @@
             })
             .subscribe();
         }
+        startSupabasePolling();
       } catch (error) {
         console.warn("Supabase no conectado", error);
       } finally {
@@ -1133,6 +1146,26 @@
           renderAll();
         }
       }
+    }
+
+    async function fetchSupabaseState(message = "") {
+      const cfg = data.api || {};
+      if (!supabaseClient || !hasSupabaseConfig()) return false;
+      const { data: remote, error } = await supabaseClient
+        .from(cfg.supabaseTable)
+        .select("state,updated_at")
+        .eq("id", cfg.supabaseRowId)
+        .maybeSingle();
+      if (error) throw error;
+      return remote?.state ? applyRemoteData(remote.state, message) : false;
+    }
+
+    function startSupabasePolling() {
+      if (supabasePollTimer) clearInterval(supabasePollTimer);
+      if (!hasSupabaseConfig()) return;
+      supabasePollTimer = setInterval(() => {
+        fetchSupabaseState("Actualización correcta").catch(error => console.warn("Polling Supabase fallido", error));
+      }, 5000);
     }
 
     async function ensureSupabaseClient() {
@@ -1994,6 +2027,8 @@
       };
       supabaseChannel = null;
       supabaseClient = null;
+      if (supabasePollTimer) clearInterval(supabasePollTimer);
+      supabasePollTimer = null;
       initialSyncPending = hasSupabaseConfig();
       saveData("Configuración API guardada");
       initSupabaseSync();
