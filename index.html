@@ -1078,16 +1078,21 @@
     }
     lastDataFingerprint = dataFingerprint(data);
 
-    function saveData(message = "Guardado") {
+    async function saveData(message = "Guardado") {
       try {
         localStorage.setItem(storeKey, JSON.stringify(data));
         lastDataFingerprint = dataFingerprint(data);
-        showToast(message);
         renderAll();
         notifyLocalLive();
-        persistSupabase();
+
+        const synced = await persistSupabase();
+        if (synced) {
+          showToast(message + " · sincronizado");
+        } else {
+          showToast(message);
+        }
       } catch (error) {
-        showToast("No se pudo guardar. Prueba una placa más ligera.");
+        showToast("No se pudo guardar.");
         console.error("Error guardando datos", error);
       }
     }
@@ -1131,11 +1136,29 @@
         await fetchSupabaseState("Actualización correcta");
         if (cfg.realtime !== false && !supabaseChannel) {
           supabaseChannel = supabaseClient
-            .channel("acc-rally-state")
-            .on("postgres_changes", { event: "*", schema: "public", table: cfg.supabaseTable, filter: `id=eq.${cfg.supabaseRowId}` }, payload => {
-              if (payload.new?.state) applyRemoteData(payload.new.state, "Actualización correcta");
-            })
-            .subscribe();
+            .channel("acc-rally-state-" + cfg.supabaseRowId)
+            .on(
+              "postgres_changes",
+              {
+                event: "*",
+                schema: "public",
+                table: cfg.supabaseTable,
+                filter: `id=eq.${cfg.supabaseRowId}`
+              },
+              payload => {
+                if (payload.eventType === "DELETE") return;
+                if (payload.new?.state) {
+                  applyRemoteData(payload.new.state, "Actualización correcta");
+                }
+              }
+            )
+            .subscribe(status => {
+              if (status === "SUBSCRIBED") {
+                console.info("Supabase Realtime conectado correctamente.");
+              } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+                console.warn("Supabase Realtime no disponible:", status);
+              }
+            });
         }
         startSupabasePolling();
       } catch (error) {
@@ -1163,9 +1186,12 @@
     function startSupabasePolling() {
       if (supabasePollTimer) clearInterval(supabasePollTimer);
       if (!hasSupabaseConfig()) return;
+
+      // Revisión periódica como respaldo de Realtime.
       supabasePollTimer = setInterval(() => {
-        fetchSupabaseState("Actualización correcta").catch(error => console.warn("Polling Supabase fallido", error));
-      }, 5000);
+        fetchSupabaseState("Actualización correcta")
+          .catch(error => console.warn("Polling Supabase fallido:", error));
+      }, 3000);
     }
 
     async function ensureSupabaseClient() {
@@ -1200,17 +1226,35 @@
     }
 
     async function persistSupabase() {
-      if (remoteApplying) return;
+      if (remoteApplying) return false;
       const cfg = data.api || {};
-      if (!cfg.supabaseUrl || !cfg.supabaseAnonKey || !cfg.supabaseTable || !cfg.supabaseRowId) return;
+      if (!cfg.supabaseUrl || !cfg.supabaseAnonKey || !cfg.supabaseTable || !cfg.supabaseRowId) {
+        console.warn("Supabase no configurado completamente.");
+        return false;
+      }
+
       try {
         await ensureSupabaseClient();
-        if (!supabaseClient) return;
-        await supabaseClient
+        if (!supabaseClient) return false;
+
+        const { error } = await supabaseClient
           .from(cfg.supabaseTable)
-          .upsert({ id: cfg.supabaseRowId, state: data, updated_at: new Date().toISOString() });
+          .upsert(
+            {
+              id: cfg.supabaseRowId,
+              state: data,
+              updated_at: new Date().toISOString()
+            },
+            { onConflict: "id" }
+          );
+
+        if (error) throw error;
+
+        return true;
       } catch (error) {
-        console.warn("No se pudo sincronizar con Supabase", error);
+        console.error("ERROR REAL sincronizando con Supabase:", error);
+        showToast("ERROR Supabase: " + (error?.message || "no se pudo sincronizar"));
+        return false;
       }
     }
 
